@@ -22,7 +22,7 @@ from os import listdir, remove as remove_file
 from os.path import dirname, isfile
 
 from mycroft.api import DeviceApi
-from mycroft.skills.core import FallbackSkill, intent_handler
+from mycroft.skills.core import FallbackSkill, intent_handler, intent_file_handler
 from adapt.intent import IntentBuilder
 from mycroft.util.log import getLogger
 
@@ -38,6 +38,7 @@ class AimlFallback(FallbackSkill):
         self.aiml_path = os.path.join(dirname(__file__),"aiml")
         self.brain_path = os.path.join(dirname(__file__), "brain", "bot_brain.brn")
         self.load_brain()
+        self.converse_mode = False
         return
 
     def initialize(self):
@@ -84,9 +85,47 @@ class AimlFallback(FallbackSkill):
         self.kernel.saveBrain(self.brain_path)
         return response
 
+    def converse(self, utterances, lang="en-us"):
+        # TODO handle end conversation intents to end conversation
+        if not self.converse_mode or self._check_end(utterances[0]):
+            self.converse_mode = False
+            return False
+
+        self.converse_mode = self._answer(utterances[0])
+        return self.converse_mode
+
+    @intent_file_handler('chat.intent')
+    def start_conversation(self, message):
+        self.converse_mode = True
+        return self.handle_fallback(message)
+    
+    @intent_file_handler('chat.end.intent')
+    def end_conversation(self, message):
+        self.converse_mode = False
+        return self.handle_fallback(message)
+    
+    def _check_end(self, query):
+        """
+        Workaround to check if conversation should be stopped
+        
+        Return:
+            True if query contains conversation ending hotwords
+        """
+        for keyword in ("end", "stop"):
+            if keyword in query:
+                return True
+        return False
+    
     def handle_fallback(self, message):
-        utterance = message.data.get("utterance")
-        answer = self.ask_brain(utterance)
+        query = message.data.get("utterance")
+        return self._answer(query)
+
+    def _answer(self, query):
+        """Return answer to string query (directly outputted)"""
+        answer = self.ask_brain(query)
+        if self.converse_mode and answer == "":
+            query = "random pick up line"
+            answer = self.ask_brain(query)
         if answer != "":
             asked_question = False
             if answer.endswith("?"):
@@ -101,6 +140,7 @@ class AimlFallback(FallbackSkill):
         super(AimlFallback, self).shutdown()
 
     def stop(self):
+        self.converse_mode = False
         pass
 
 def create_skill():
